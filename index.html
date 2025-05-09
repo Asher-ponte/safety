@@ -396,7 +396,7 @@
       const { addNotification } = useContext(NotificationContext) || {};
       const canvasRef = useRef(null);
       const chartRef = useRef(null);
-      const [incidents] = useState(() => {
+      const [incidents, setIncidents] = useState(() => {
         try {
           const saved = localStorage.getItem('incidents');
           return saved && saved !== 'undefined' ? JSON.parse(saved) : [];
@@ -405,6 +405,12 @@
           return [];
         }
       });
+
+      useEffect(() => {
+        fetch('http://localhost:4000/api/incidents')
+          .then(res => res.json())
+          .then(data => setIncidents(data));
+      }, []);
 
       useEffect(() => {
         if (!incidentData || !incidentData.months || !incidentData.counts) {
@@ -486,7 +492,7 @@
       const [editIncidentData, setEditIncidentData] = useState([...(incidentData?.counts || [])]);
       const canvasRef = useRef(null);
       const chartRef = useRef(null);
-      const [incidents] = useState(() => {
+      const [incidents, setIncidents] = useState(() => {
         try {
           const saved = localStorage.getItem('incidents');
           return saved && saved !== 'undefined' ? JSON.parse(saved) : [];
@@ -495,6 +501,12 @@
           return [];
         }
       });
+
+      useEffect(() => {
+        fetch('http://localhost:4000/api/incidents')
+          .then(res => res.json())
+          .then(data => setIncidents(data));
+      }, []);
 
       useEffect(() => {
         setEditIncidentData([...(incidentData?.counts || [])]);
@@ -687,15 +699,8 @@
       const { user } = useContext(AuthContext) || {};
       const { addNotification } = useContext(NotificationContext) || {};
       const [activeTab, setActiveTab] = useState("summary");
-      const [incidents, setIncidents] = useState(() => {
-        try {
-          const saved = localStorage.getItem('incidents');
-          return saved && saved !== 'undefined' ? JSON.parse(saved) : [];
-        } catch (e) {
-          console.error("Error parsing incidents from localStorage:", e);
-          return [];
-        }
-      });
+      const [incidents, setIncidents] = useState([]);
+      const [loading, setLoading] = useState(true);
       const [formData, setFormData] = useState({
         type: 'Near Miss',
         detail: '',
@@ -710,25 +715,25 @@
         correction: '',
         correctiveAction: '',
         photos: [],
-        evidence: [], // Add evidence files array
+        evidence: [],
       });
       const [selectedIncident, setSelectedIncident] = useState(null);
       const [remarks, setRemarks] = useState('');
       const [photoModal, setPhotoModal] = useState({ open: false, photo: null });
 
+      // Fetch incidents from backend on mount
       useEffect(() => {
-        try {
-          localStorage.setItem('incidents', JSON.stringify(incidents));
-        } catch (e) {
-          console.error("Error saving incidents to localStorage:", e);
-          addNotification && addNotification("Failed to save incidents.", 'error');
-        }
-      }, [incidents]);
-
-      if (!user || !addNotification) {
-        console.error("Missing context: user or addNotification undefined");
-        return <div>Context not available. Please refresh the page.</div>;
-      }
+        fetch('http://localhost:4000/api/incidents')
+          .then(res => res.json())
+          .then(data => {
+            setIncidents(data);
+            setLoading(false);
+          })
+          .catch(() => {
+            addNotification && addNotification("Failed to load incidents from server.", 'error');
+            setLoading(false);
+          });
+      }, []);
 
       const handleInputChange = (e) => {
         setFormData({ ...formData, [e.target.name]: e.target.value });
@@ -806,7 +811,7 @@
             .split("\n")
             .map(line => line.trim())
             .filter(line => line.length > 0);
-          
+
           const newIncident = {
             id: Date.now(),
             ...formData,
@@ -817,63 +822,45 @@
             adminComments: '',
             reportedAt: new Date().toISOString()
           };
-          setIncidents([newIncident, ...incidents]);
-          setFormData({
-            type: 'Near Miss',
-            detail: '',
-            date: new Date().toISOString().split('T')[0],
-            time: new Date().toTimeString().slice(0, 5),
-            location: '',
-            area: '',
-            incidentOwner: '',
-            involvedPerson: '',
-            designation: '',
-            rootCauses: '',
-            correction: '',
-            correctiveAction: '',
-            photos: [],
-            evidence: [],
-          });
-          addNotification(`New ${formData.type} incident reported!`, 'info');
-          setActiveTab("summary");
+
+          // Save to backend
+          fetch('http://localhost:4000/api/incidents', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(newIncident)
+          })
+            .then(res => res.json())
+            .then(savedIncident => {
+              setIncidents([savedIncident, ...incidents]);
+              setFormData({
+                type: 'Near Miss',
+                detail: '',
+                date: new Date().toISOString().split('T')[0],
+                time: new Date().toTimeString().slice(0, 5),
+                location: '',
+                area: '',
+                incidentOwner: '',
+                involvedPerson: '',
+                designation: '',
+                rootCauses: '',
+                correction: '',
+                correctiveAction: '',
+                photos: [],
+                evidence: [],
+              });
+              addNotification(`New ${formData.type} incident reported!`, 'info');
+              setActiveTab("summary");
+            })
+            .catch(() => {
+              addNotification("Failed to submit incident to server.", 'error');
+            });
         } catch (e) {
           console.error("Error submitting incident:", e);
           addNotification("Failed to submit incident.", 'error');
         }
       };
 
-      const toggleStatus = (incidentId) => {
-        try {
-          setIncidents(prev => prev.map(incident => {
-            if (incident.id === incidentId) {
-              const newStatus = incident.status === 'Open' ? 'Closed' : 'Open';
-              return { ...incident, status: newStatus, remarks: remarks || incident.remarks };
-            }
-            return incident;
-          }));
-          setSelectedIncident(null);
-          setRemarks('');
-          addNotification(`Incident ${incidentId} marked as ${incidents.find(i => i.id === incidentId).status === 'Open' ? 'Closed' : 'Open'}!`, 'info');
-        } catch (e) {
-          console.error("Error toggling incident status:", e);
-          addNotification("Failed to update incident status.", 'error');
-        }
-      };
-
-      const openRemarksModal = (incident) => {
-        setSelectedIncident(incident);
-        setRemarks(incident.remarks || '');
-      };
-
-      // Helper function to download evidence files
-      const handleEvidenceDownload = (evidence) => {
-        const link = document.createElement('a');
-        link.href = evidence.data;
-        link.download = evidence.name;
-        document.body.appendChild(link);
-        link.click();
-        document.body.removeChild(link);
-      };
+      if (loading) return <div className="p-6">Loading incidents...</div>;
 
       return (
         <div className="p-6 bg-gray-100 flex-grow h-full flex flex-col">
@@ -1239,6 +1226,12 @@ Lack of training"
       const [deleteConfirm, setDeleteConfirm] = useState(null);
       const [adminComments, setAdminComments] = useState('');
       const [photoModal, setPhotoModal] = useState({ open: false, photo: null });
+
+      useEffect(() => {
+        fetch('http://localhost:4000/api/incidents')
+          .then(res => res.json())
+          .then(data => setIncidents(data));
+      }, []);
 
       useEffect(() => {
         try {
