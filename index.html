@@ -1,0 +1,2040 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Safety Dashboard</title>
+  <script src="https://cdn.jsdelivr.net/npm/react@17/umd/react.development.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/react-dom@17/umd/react-dom.development.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@babel/standalone/babel.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@3.9.1/dist/chart.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
+  <link href="https://cdn.jsdelivr.net/npm/tailwindcss@2.2.19/dist/tailwind.min.css" rel="stylesheet">
+  <style>
+    body {
+      margin: 0;
+      overflow: hidden;
+    }
+    .no-scrollbar {
+      scrollbar-width: none; /* Firefox */
+      -ms-overflow-style: none; /* IE and Edge */
+    }
+    .no-scrollbar::-webkit-scrollbar {
+      display: none; /* Chrome, Safari, Opera */
+    }
+    .scrollbar-thin {
+      scrollbar-width: thin;
+    }
+    .scrollbar-thumb-blue-400::-webkit-scrollbar-thumb {
+      background-color: #60a5fa;
+      border-radius: 8px;
+    }
+    .scrollbar-track-blue-100::-webkit-scrollbar-track {
+      background-color: #dbeafe;
+      border-radius: 8px;
+    }
+    .scrollbar-thin::-webkit-scrollbar {
+      height: 8px;
+      background: #dbeafe;
+      border-radius: 8px;
+    }
+    .scrollbar-thin::-webkit-scrollbar-thumb {
+      background: #60a5fa;
+      border-radius: 8px;
+    }
+  </style>
+</head>
+<body>
+  <!-- Script to clear user session on page load -->
+  <script>
+    // Always clear the current user session on page load to force login
+    localStorage.removeItem('currentUser');
+  </script>
+  <div id="root"></div>
+  <script type="text/babel">
+    const { useState, useEffect, useContext, useRef } = React;
+
+    // UploadedDataStore for handling uploaded files in memory
+    const UploadedDataStore = {
+      _data: [],
+      addData(item) {
+        this._data.push(item);
+      },
+      getAll() {
+        return this._data;
+      }
+    };
+
+    // Authentication Context
+    const AuthContext = React.createContext();
+    const AuthProvider = ({ children }) => {
+      const [user, setUser] = useState(() => {
+        const savedUser = localStorage.getItem('currentUser');
+        return savedUser ? JSON.parse(savedUser) : null;
+      });
+      const [users, setUsers] = useState(() => {
+        const savedUsers = localStorage.getItem('users');
+        return savedUsers ? JSON.parse(savedUsers) : [
+          { id: 1, username: 'admin', email: 'admin@example.com', password: 'admin123', role: 'administrator', name: 'Admin User' },
+          { id: 2, username: 'employee', email: 'employee@example.com', password: 'emp123', role: 'employee', name: 'Employee User' }
+        ];
+      });
+
+      useEffect(() => {
+        localStorage.setItem('users', JSON.stringify(users));
+        if (user) {
+          localStorage.setItem('currentUser', JSON.stringify(user));
+        } else {
+          localStorage.removeItem('currentUser');
+        }
+      }, [users, user]);
+
+      const login = (username, password) => {
+        const foundUser = users.find(
+          u => u.username === username && u.password === password
+        );
+        if (foundUser) {
+          setUser(foundUser);
+          return true;
+        }
+        return false;
+      };
+
+      const logout = () => setUser(null);
+
+      const addUser = (newUser) => {
+        const id = Date.now();
+        const userWithId = { id, ...newUser, name: newUser.username };
+        setUsers(prev => [...prev, userWithId]);
+        return userWithId;
+      };
+
+      return (
+        <AuthContext.Provider value={{ user, users, login, logout, addUser }}>
+          {children}
+        </AuthContext.Provider>
+      );
+    };
+
+    // Notification Context
+    const NotificationContext = React.createContext();
+    const NotificationProvider = ({ children }) => {
+      const [notifications, setNotifications] = useState([]);
+      const addNotification = (message, type = 'info') => {
+        const id = Date.now();
+        setNotifications(prev => [...prev, { id, message, type }]);
+        setTimeout(() => {
+          setNotifications(prev => prev.filter(n => n.id !== id));
+        }, 5000);
+      };
+      return (
+        <NotificationContext.Provider value={{ addNotification, notifications }}>
+          {children}
+        </NotificationContext.Provider>
+      );
+    };
+
+    // Data Context for Incident Data
+    const DataContext = React.createContext();
+    const DataProvider = ({ children }) => {
+      const [incidentData, setIncidentData] = useState(() => {
+        const savedData = localStorage.getItem('incidentData');
+        return savedData ? JSON.parse(savedData) : {
+          months: ['JAN', 'FEB', 'MAR', 'APR', 'MAY', 'JUN', 'JUL', 'AUG', 'SEP', 'OCT', 'NOV', 'DEC'],
+          counts: [7, 5, 7, 2, 0, 4, 0, 0, 3, 2, 0, 2]
+        };
+      });
+
+      useEffect(() => {
+        localStorage.setItem('incidentData', JSON.stringify(incidentData));
+      }, [incidentData]);
+
+      return (
+        <DataContext.Provider value={{ incidentData, setIncidentData }}>
+          {children}
+        </DataContext.Provider>
+      );
+    };
+
+    // Documents Context
+    const DocumentsContext = React.createContext();
+    const DocumentsProvider = ({ children }) => {
+      const [documents, setDocuments] = useState(() => {
+        const savedDocs = localStorage.getItem('documents');
+        return savedDocs ? JSON.parse(savedDocs) : {
+          Procedure: [],
+          Guidelines: [],
+          Forms: []
+        };
+      });
+
+      useEffect(() => {
+        localStorage.setItem('documents', JSON.stringify(documents));
+      }, [documents]);
+
+      const addDocument = (folder, doc) => {
+        setDocuments(prev => ({
+          ...prev,
+          [folder]: [...prev[folder], doc]
+        }));
+      };
+
+      return (
+        <DocumentsContext.Provider value={{ documents, addDocument }}>
+          {children}
+        </DocumentsContext.Provider>
+      );
+    };
+
+    // Photo Modal Component
+    const PhotoModal = ({ photo, onClose }) => (
+      <div className="fixed inset-0 z-50 flex items-center justify-center bg-black bg-opacity-70">
+        <div className="relative bg-white rounded-lg shadow-lg p-4 max-w-2xl w-full flex flex-col items-center">
+          <button
+            onClick={onClose}
+            className="absolute top-2 right-2 text-gray-700 hover:text-red-600 text-2xl font-bold"
+            aria-label="Close"
+          >
+            &times;
+          </button>
+          <img src={photo} alt="Incident Full View" className="max-h-[70vh] max-w-full rounded" />
+        </div>
+      </div>
+    );
+
+    // Incident Status Pie Chart Component
+    const IncidentStatusPieChart = ({ incidents }) => {
+      const canvasRef = useRef(null);
+      const chartRef = useRef(null);
+      
+      useEffect(() => {
+        if (!incidents || incidents.length === 0) return;
+        
+        // Count incidents by status
+        const statusCounts = incidents.reduce((acc, incident) => {
+          const status = incident.status || 'Unknown';
+          acc[status] = (acc[status] || 0) + 1;
+          return acc;
+        }, {});
+        
+        const labels = Object.keys(statusCounts);
+        const data = Object.values(statusCounts);
+        const backgroundColors = labels.map(status => {
+          switch(status) {
+            case 'Open': return '#FF0000'; // Red
+            case 'Closed': return '#00FF00'; // Green
+            case 'Approved': return '#36A2EB'; // Blue
+            case 'Rejected': return '#FF6384'; // Pink
+            default: return '#C9CBCF'; // Grey
+          }
+        });
+        
+        if (canvasRef.current) {
+          if (chartRef.current) {
+            chartRef.current.destroy();
+          }
+          
+          const ctx = canvasRef.current.getContext('2d');
+          chartRef.current = new Chart(ctx, {
+            type: 'pie',
+            data: {
+              labels: labels,
+              datasets: [{
+                data: data,
+                backgroundColor: backgroundColors,
+                borderColor: backgroundColors,
+                borderWidth: 1
+              }]
+            },
+            options: {
+              responsive: true,
+              maintainAspectRatio: false,
+              plugins: {
+                legend: {
+                  position: 'right',
+                },
+                title: {
+                  display: true,
+                  text: 'Incident Status Distribution'
+                }
+              }
+            }
+          });
+        }
+        
+        return () => {
+          if (chartRef.current) {
+            chartRef.current.destroy();
+            chartRef.current = null;
+          }
+        };
+      }, [incidents]);
+      
+      if (!incidents || incidents.length === 0) {
+        return <div className="text-center p-4">No incident data available</div>;
+      }
+      
+      return (
+        <div className="w-full max-w-md">
+          <canvas ref={canvasRef}></canvas>
+        </div>
+      );
+    };
+
+    // Notification Component
+    const Notification = ({ message, type }) => {
+      const typeStyles = {
+        info: 'bg-blue-500',
+        warning: 'bg-yellow-500',
+        error: 'bg-red-500'
+      };
+      return (
+        <div className={`fixed top-4 right-4 ${typeStyles[type]} text-white px-4 py-2 rounded shadow-lg animate-slide-in`}>
+          {message}
+        </div>
+      );
+    };
+
+    // Error Boundary Component
+    class ErrorBoundary extends React.Component {
+      state = { hasError: false, error: null };
+
+      static getDerivedStateFromError(error) {
+        return { hasError: true, error };
+      }
+
+      componentDidCatch(error, errorInfo) {
+        console.error("ErrorBoundary caught:", error, errorInfo);
+      }
+
+      render() {
+        if (this.state.hasError) {
+          return (
+            <div className="p-6 text-red-600">
+              <h2>Something went wrong.</h2>
+              <p>Please try refreshing the page or contact support.</p>
+              <p>Error: {this.state.error?.message}</p>
+            </div>
+          );
+        }
+        return this.props.children;
+      }
+    }
+
+    // TopNavBar Component
+    const TopNavBar = ({ page, setPage }) => {
+      const { user } = useContext(AuthContext) || {};
+      const menuItems = [
+        { text: "Dashboard", path: "dashboard", roles: ["employee", "safety_manager", "administrator"] },
+        { text: "Incidents", path: "incidents", roles: ["employee", "safety_manager"] },
+        { text: "Incident Management", path: "incident-management", roles: ["administrator"] },
+        { text: "Training", path: "training", roles: ["safety_manager"] },
+        { text: "Compliance", path: "compliance", roles: ["safety_manager"] },
+        { text: "Documents", path: "documents", roles: ["employee", "safety_manager", "administrator"] },
+        { text: "User Management", path: "users", roles: ["administrator"] },
+      ];
+
+      return (
+        <nav className="bg-gray-800 shadow-md">
+          <div className="max-w-full mx-auto px-4">
+            <div className="flex items-center justify-between h-16">
+              <div className="flex items-center">
+                <span className="text-white text-2xl font-bold mr-8">Safety Dashboard</span>
+                <div className="flex space-x-2">
+                  {user && menuItems
+                    .filter(item => item.roles.includes(user.role))
+                    .map((item, idx) => (
+                      <a
+                        key={idx}
+                        href={`#${item.path}`}
+                        onClick={e => {
+                          e.preventDefault();
+                          window.location.hash = item.path;
+                          setPage(item.path);
+                        }}
+                        className={`px-3 py-2 rounded-md text-sm font-medium transition ${
+                          page === item.path
+                            ? "bg-gray-900 text-white"
+                            : "text-gray-300 hover:bg-gray-700 hover:text-white"
+                        }`}
+                      >
+                        {item.text}
+                      </a>
+                    ))}
+                </div>
+              </div>
+              <UserMenu />
+            </div>
+          </div>
+        </nav>
+      );
+    };
+
+    // UserMenu Component for TopNavBar
+    const UserMenu = () => {
+      const { user, logout } = useContext(AuthContext) || {};
+      if (!user) return null;
+      return (
+        <div className="flex items-center">
+          <span className="mr-4 font-medium text-gray-200">{user.name} ({user.role})</span>
+          <button
+            onClick={logout}
+            className="bg-red-500 px-4 py-2 rounded-lg hover:bg-red-600 transition duration-200 text-white"
+          >
+            Logout
+          </button>
+        </div>
+      );
+    };
+
+    // Empty Header Component (replaced by TopNavBar)
+    const Header = () => null;
+
+    // User Dashboard Component
+    const UserDashboard = () => {
+      const { incidentData } = useContext(DataContext) || {};
+      const { addNotification } = useContext(NotificationContext) || {};
+      const canvasRef = useRef(null);
+      const chartRef = useRef(null);
+      const [incidents] = useState(() => {
+        try {
+          const saved = localStorage.getItem('incidents');
+          return saved && saved !== 'undefined' ? JSON.parse(saved) : [];
+        } catch (e) {
+          console.error("Error parsing incidents from localStorage:", e);
+          return [];
+        }
+      });
+
+      useEffect(() => {
+        if (!incidentData || !incidentData.months || !incidentData.counts) {
+          console.error("Invalid incidentData:", incidentData);
+          addNotification && addNotification("Failed to load incident data.", "error");
+          return;
+        }
+
+        if (canvasRef.current) {
+          if (chartRef.current) {
+            chartRef.current.destroy();
+          }
+
+          const ctx = canvasRef.current.getContext('2d');
+          chartRef.current = new Chart(ctx, {
+            type: 'bar',
+            data: {
+              labels: incidentData.months,
+              datasets: [{
+                label: 'Incident Count',
+                data: incidentData.counts,
+                backgroundColor: '#36A2EB',
+                borderColor: '#36A2EB',
+                borderWidth: 1
+              }]
+            },
+            options: {
+              responsive: true,
+              maintainAspectRatio: false,
+              scales: {
+                y: {
+                  beginAtZero: true,
+                  title: { display: true, text: 'Incident Count' }
+                },
+                x: {
+                  title: { display: true, text: 'Month' }
+                }
+              },
+              plugins: {
+                title: { display: true, text: 'Monthly Incident Data' }
+              }
+            }
+          });
+        }
+
+        return () => {
+          if (chartRef.current) {
+            chartRef.current.destroy();
+            chartRef.current = null;
+          }
+        };
+      }, [incidentData]);
+
+      if (!incidentData || !incidentData.months || !incidentData.counts) {
+        return <div className="p-6 text-red-600">Error: Incident data not available</div>;
+      }
+
+      return (
+        <div className="p-6 bg-gray-100 flex-grow h-full min-h-0">
+          <h2 className="text-2xl font-bold mb-6 text-gray-800">Dashboard Overview</h2>
+          <div className="flex flex-row gap-6">
+            <div className="bg-white p-6 rounded-lg shadow-md w-1/2">
+              <IncidentStatusPieChart incidents={incidents} />
+            </div>
+            <div className="bg-white p-6 rounded-lg shadow-md w-1/2">
+              <div className="w-full h-64">
+                <canvas ref={canvasRef} id="incidentChart"></canvas>
+              </div>
+            </div>
+          </div>
+        </div>
+      );
+    };
+
+    // Admin Dashboard Component
+    const AdminDashboard = () => {
+      const { incidentData, setIncidentData } = useContext(DataContext) || {};
+      const { addNotification } = useContext(NotificationContext) || {};
+      const [editIncidentData, setEditIncidentData] = useState([...(incidentData?.counts || [])]);
+      const canvasRef = useRef(null);
+      const chartRef = useRef(null);
+      const [incidents] = useState(() => {
+        try {
+          const saved = localStorage.getItem('incidents');
+          return saved && saved !== 'undefined' ? JSON.parse(saved) : [];
+        } catch (e) {
+          console.error("Error parsing incidents from localStorage:", e);
+          return [];
+        }
+      });
+
+      useEffect(() => {
+        setEditIncidentData([...(incidentData?.counts || [])]);
+      }, [incidentData]);
+
+      useEffect(() => {
+        if (!incidentData || !incidentData.months || !incidentData.counts) {
+          console.error("Invalid incidentData:", incidentData);
+          addNotification && addNotification("Failed to load incident data.", "error");
+          return;
+        }
+
+        if (canvasRef.current) {
+          if (chartRef.current) {
+            chartRef.current.destroy();
+          }
+
+          const ctx = canvasRef.current.getContext('2d');
+          chartRef.current = new Chart(ctx, {
+            type: 'bar',
+            data: {
+              labels: incidentData.months,
+              datasets: [{
+                label: 'Incident Count',
+                data: incidentData.counts,
+                backgroundColor: '#36A2EB',
+                borderColor: '#36A2EB',
+                borderWidth: 1
+              }]
+            },
+            options: {
+              responsive: true,
+              maintainAspectRatio: false,
+              scales: {
+                y: {
+                  beginAtZero: true,
+                  title: { display: true, text: 'Incident Count' }
+                },
+                x: {
+                  title: { display: true, text: 'Month' }
+                }
+              },
+              plugins: {
+                title: { display: true, text: 'Monthly Incident Data' }
+              }
+            }
+          });
+        }
+
+        return () => {
+          if (chartRef.current) {
+            chartRef.current.destroy();
+            chartRef.current = null;
+          }
+        };
+      }, [incidentData]);
+
+      if (!incidentData || !incidentData.months || !incidentData.counts) {
+        return <div className="p-6 text-red-600">Error: Incident data not available</div>;
+      }
+
+      const handleIncidentInputChange = (index, value) => {
+        const numericValue = value === '' ? 0 : Math.max(0, parseInt(value) || 0);
+        setEditIncidentData(prev => {
+          const updated = [...prev];
+          updated[index] = numericValue;
+          return updated;
+        });
+      };
+
+      const handleSaveIncidentData = () => {
+        try {
+          setIncidentData(prev => ({
+            ...prev,
+            counts: [...editIncidentData]
+          }));
+          addNotification('Incident data updated successfully!', 'info');
+        } catch (e) {
+          console.error("Error saving incident data:", e);
+          addNotification('Failed to update incident data.', 'error');
+        }
+      };
+
+      return (
+        <div className="p-6 bg-gray-100 flex-grow">
+          <h2 className="text-2xl font-bold mb-6 text-gray-800">Admin Dashboard</h2>
+          <div className="flex flex-row gap-6 mb-8">
+            <div className="bg-white p-6 rounded-lg shadow-md w-1/2">
+              <IncidentStatusPieChart incidents={incidents} />
+            </div>
+            <div className="bg-white p-6 rounded-lg shadow-md w-1/2">
+              <div className="w-full h-64">
+                <canvas ref={canvasRef} id="incidentChart"></canvas>
+              </div>
+            </div>
+          </div>
+          <div className="bg-white p-6 rounded-lg shadow-md">
+            <h3 className="text-lg font-semibold mb-4">Monthly Incident Data Entry</h3>
+            <div
+              className="overflow-x-auto scrollbar-thin scrollbar-thumb-blue-400 scrollbar-track-blue-100"
+              style={{
+                maxWidth: "100%",
+                borderRadius: "0.5rem",
+                border: "1px solid #e5e7eb",
+                boxShadow: "0 1px 2px rgba(0,0,0,0.03)",
+                marginBottom: "1rem"
+              }}
+            >
+              <table className="min-w-max divide-y divide-gray-200">
+                <thead className="bg-gray-50 sticky top-0 z-10">
+                  <tr>
+                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Month</th>
+                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Incident Count</th>
+                  </tr>
+                </thead>
+                <tbody className="bg-white divide-y divide-gray-200">
+                  {incidentData.months.map((month, index) => (
+                    <tr key={month}>
+                      <td className="px-6 py-4 whitespace-nowrap">{month}</td>
+                      <td className="px-6 py-4 whitespace-nowrap">
+                        <input
+                          type="number"
+                          min="0"
+                          value={editIncidentData[index]}
+                          onChange={(e) => handleIncidentInputChange(index, e.target.value)}
+                          className="w-24 rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring focus:ring-blue-500 focus:ring-opacity-50"
+                        />
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+            <div className="mt-4">
+              <button
+                onClick={handleSaveIncidentData}
+                className="bg-blue-500 text-white px-4 py-2 rounded-lg hover:bg-blue-600 transition duration-200"
+              >
+                Save Incident Data
+              </button>
+            </div>
+            <div className="text-xs text-gray-400 mt-2">
+              <span className="inline-block align-middle mr-2">&#8596;</span>
+              Scroll horizontally to view all months if not visible.
+            </div>
+      </div>
+        </div>
+      );
+    };
+
+    // Dashboard Overview
+    const DashboardOverview = () => {
+      const { user } = useContext(AuthContext) || {};
+      if (user?.role === 'administrator') {
+        return <AdminDashboard />;
+      }
+      return <UserDashboard />;
+    };
+
+    // Navigation Bar Component
+    const NavigationBar = ({ setActiveTab, activeTab }) => {
+      return (
+        <div className="mb-6 flex border-b border-gray-300">
+          <button
+            className={`px-4 py-2 font-semibold ${
+              activeTab === "summary"
+                ? "border-b-2 border-blue-600 text-blue-600"
+                : "text-gray-600"
+            }`}
+            onClick={() => setActiveTab("summary")}
+          >
+            Incident Summary
+          </button>
+          <button
+            className={`ml-4 px-4 py-2 font-semibold ${
+              activeTab === "report"
+                ? "border-b-2 border-blue-600 text-blue-600"
+                : "text-gray-600"
+            }`}
+            onClick={() => setActiveTab("report")}
+          >
+            Incident Reporting
+          </button>
+        </div>
+      );
+    };
+
+    // Incident Reporting Component
+    const IncidentReporting = () => {
+      const { user } = useContext(AuthContext) || {};
+      const { addNotification } = useContext(NotificationContext) || {};
+      const [activeTab, setActiveTab] = useState("summary");
+      const [incidents, setIncidents] = useState(() => {
+        try {
+          const saved = localStorage.getItem('incidents');
+          return saved && saved !== 'undefined' ? JSON.parse(saved) : [];
+        } catch (e) {
+          console.error("Error parsing incidents from localStorage:", e);
+          return [];
+        }
+      });
+      const [formData, setFormData] = useState({
+        type: 'Near Miss',
+        detail: '',
+        date: new Date().toISOString().split('T')[0],
+        time: new Date().toTimeString().slice(0, 5),
+        location: '',
+        area: '',
+        incidentOwner: '',
+        involvedPerson: '',
+        designation: '',
+        rootCauses: '',
+        correction: '',
+        correctiveAction: '',
+        photos: [],
+        evidence: [], // Add evidence files array
+      });
+      const [selectedIncident, setSelectedIncident] = useState(null);
+      const [remarks, setRemarks] = useState('');
+      const [photoModal, setPhotoModal] = useState({ open: false, photo: null });
+
+      useEffect(() => {
+        try {
+          localStorage.setItem('incidents', JSON.stringify(incidents));
+        } catch (e) {
+          console.error("Error saving incidents to localStorage:", e);
+          addNotification && addNotification("Failed to save incidents.", 'error');
+        }
+      }, [incidents]);
+
+      if (!user || !addNotification) {
+        console.error("Missing context: user or addNotification undefined");
+        return <div>Context not available. Please refresh the page.</div>;
+      }
+
+      const handleInputChange = (e) => {
+        setFormData({ ...formData, [e.target.name]: e.target.value });
+      };
+
+      const handlePhotoUpload = (e) => {
+        try {
+          const files = Array.from(e.target.files).slice(0, 3);
+          const readers = files.map(file => {
+            return new Promise(resolve => {
+              const reader = new FileReader();
+              reader.onload = () => {
+                UploadedDataStore.addData({ type: 'photo', name: file.name, data: reader.result });
+                resolve(reader.result);
+              };
+              reader.onerror = () => {
+                console.error("Error reading file:", file.name);
+                resolve(null);
+              };
+              reader.readAsDataURL(file);
+            });
+          });
+          Promise.all(readers).then(results => {
+            const validResults = results.filter(r => r).slice(0, 3);
+            setFormData(prev => ({ ...prev, photos: [...prev.photos, ...validResults].slice(0, 3) }));
+            if (results.length !== validResults.length) {
+              addNotification("Some photos failed to upload.", 'warning');
+            }
+          });
+        } catch (e) {
+          console.error("Error handling photo upload:", e);
+          addNotification("Failed to upload photos.", 'error');
+        }
+      };
+
+      // Evidence file upload handler
+      const handleEvidenceUpload = (e) => {
+        try {
+          const files = Array.from(e.target.files).slice(0, 3);
+          const readers = files.map(file => {
+            return new Promise(resolve => {
+              const reader = new FileReader();
+              reader.onload = () => {
+                UploadedDataStore.addData({ type: 'evidence', name: file.name, data: reader.result });
+                resolve({ name: file.name, data: reader.result });
+              };
+              reader.onerror = () => {
+                console.error("Error reading file:", file.name);
+                resolve(null);
+              };
+              reader.readAsDataURL(file);
+            });
+          });
+          Promise.all(readers).then(results => {
+            const validResults = results.filter(r => r).slice(0, 3);
+            setFormData(prev => ({ ...prev, evidence: [...prev.evidence, ...validResults].slice(0, 3) }));
+            if (results.length !== validResults.length) {
+              addNotification("Some evidence files failed to upload.", 'warning');
+            }
+          });
+        } catch (e) {
+          console.error("Error handling evidence upload:", e);
+          addNotification("Failed to upload evidence files.", 'error');
+        }
+      };
+
+      const handleSubmit = (e) => {
+        e.preventDefault();
+        if (!formData.detail || !formData.location || !formData.rootCauses.trim()) {
+          addNotification('Please fill in all required fields.', 'error');
+          return;
+        }
+        try {
+          const rootCausesArr = formData.rootCauses
+            .split("\n")
+            .map(line => line.trim())
+            .filter(line => line.length > 0);
+          
+          const newIncident = {
+            id: Date.now(),
+            ...formData,
+            rootCauses: rootCausesArr,
+            reportedBy: user.name,
+            status: 'Open',
+            remarks: '',
+            adminComments: '',
+            reportedAt: new Date().toISOString()
+          };
+          setIncidents([newIncident, ...incidents]);
+          setFormData({
+            type: 'Near Miss',
+            detail: '',
+            date: new Date().toISOString().split('T')[0],
+            time: new Date().toTimeString().slice(0, 5),
+            location: '',
+            area: '',
+            incidentOwner: '',
+            involvedPerson: '',
+            designation: '',
+            rootCauses: '',
+            correction: '',
+            correctiveAction: '',
+            photos: [],
+            evidence: [],
+          });
+          addNotification(`New ${formData.type} incident reported!`, 'info');
+          setActiveTab("summary");
+        } catch (e) {
+          console.error("Error submitting incident:", e);
+          addNotification("Failed to submit incident.", 'error');
+        }
+      };
+
+      const toggleStatus = (incidentId) => {
+        try {
+          setIncidents(prev => prev.map(incident => {
+            if (incident.id === incidentId) {
+              const newStatus = incident.status === 'Open' ? 'Closed' : 'Open';
+              return { ...incident, status: newStatus, remarks: remarks || incident.remarks };
+            }
+            return incident;
+          }));
+          setSelectedIncident(null);
+          setRemarks('');
+          addNotification(`Incident ${incidentId} marked as ${incidents.find(i => i.id === incidentId).status === 'Open' ? 'Closed' : 'Open'}!`, 'info');
+        } catch (e) {
+          console.error("Error toggling incident status:", e);
+          addNotification("Failed to update incident status.", 'error');
+        }
+      };
+
+      const openRemarksModal = (incident) => {
+        setSelectedIncident(incident);
+        setRemarks(incident.remarks || '');
+      };
+
+      // Helper function to download evidence files
+      const handleEvidenceDownload = (evidence) => {
+        const link = document.createElement('a');
+        link.href = evidence.data;
+        link.download = evidence.name;
+        document.body.appendChild(link);
+        link.click();
+        document.body.removeChild(link);
+      };
+
+      return (
+        <div className="p-6 bg-gray-100 flex-grow h-full flex flex-col">
+          <NavigationBar setActiveTab={setActiveTab} activeTab={activeTab} />
+
+          {/* Incident Summary Tab */}
+          {activeTab === "summary" && (
+            <div
+              className="bg-white p-0 rounded-lg shadow-md flex flex-col h-full w-full"
+              style={{
+                height: "100vh",
+                maxHeight: "100vh",
+                minHeight: 0,
+                overflow: "hidden"
+              }}
+            >
+              <div className="p-6 pb-2">
+                <h2 className="text-2xl font-bold mb-4 text-gray-800">Incident Summary</h2>
+              </div>
+              <div
+                className="flex-1 overflow-x-auto overflow-y-auto"
+                style={{
+                  minHeight: 0,
+                  maxHeight: "calc(100vh - 90px)", // 90px = header + padding, adjust as needed
+                }}
+              >
+                {incidents.length === 0 ? (
+                  <p className="text-gray-500 p-6">No incidents reported.</p>
+                ) : (
+                  <table className="min-w-full divide-y divide-gray-200 text-xs">
+                    <thead className="bg-gray-50 sticky top-0 z-10">
+                      <tr>
+                        <th className="px-4 py-2 text-left font-medium text-gray-500 uppercase tracking-wider bg-gray-50">ID</th>
+                        <th className="px-4 py-2 text-left font-medium text-gray-500 uppercase tracking-wider bg-gray-50">Type</th>
+                        <th className="px-4 py-2 text-left font-medium text-gray-500 uppercase tracking-wider bg-gray-50">Detail</th>
+                        <th className="px-4 py-2 text-left font-medium text-gray-500 uppercase tracking-wider bg-gray-50">Date</th>
+                        <th className="px-4 py-2 text-left font-medium text-gray-500 uppercase tracking-wider bg-gray-50">Time</th>
+                        <th className="px-4 py-2 text-left font-medium text-gray-500 uppercase tracking-wider bg-gray-50">Location</th>
+                        <th className="px-4 py-2 text-left font-medium text-gray-500 uppercase tracking-wider bg-gray-50">Person</th>
+                        <th className="px-4 py-2 text-left font-medium text-gray-500 uppercase tracking-wider bg-gray-50">Root Causes</th>
+                        <th className="px-4 py-2 text-left font-medium text-gray-500 uppercase tracking-wider bg-gray-50">Photos</th>
+                        <th className="px-4 py-2 text-left font-medium text-gray-500 uppercase tracking-wider bg-gray-50">Evidence</th>
+                        <th className="px-4 py-2 text-left font-medium text-gray-500 uppercase tracking-wider bg-gray-50">Status</th>
+                      </tr>
+                    </thead>
+                    <tbody className="bg-white divide-y divide-gray-200">
+                      {incidents.map((incident, index) => (
+                        <tr key={incident.id || index}>
+                          <td className="px-4 py-2 whitespace-nowrap">{index + 1}</td>
+                          <td className="px-4 py-2 whitespace-nowrap">{incident.type || 'N/A'}</td>
+                          <td className="px-4 py-2 break-words max-w-xs">{incident.detail || 'N/A'}</td>
+                          <td className="px-4 py-2 whitespace-nowrap">{incident.date ? new Date(incident.date).toLocaleDateString() : 'N/A'}</td>
+                          <td className="px-4 py-2 whitespace-nowrap">{incident.time || 'N/A'}</td>
+                          <td className="px-4 py-2 whitespace-nowrap">{incident.location || 'N/A'}</td>
+                          <td className="px-4 py-2 whitespace-nowrap">{incident.involvedPerson || 'N/A'}</td>
+                          <td className="px-4 py-2 whitespace-normal break-words max-w-xs">
+                            {Array.isArray(incident.rootCauses) && incident.rootCauses.length > 0 ? (
+                              <ul className="list-disc pl-4">
+                                {incident.rootCauses.map((cause, idx) => (
+                                  <li key={idx}>{cause}</li>
+                                ))}
+                              </ul>
+                            ) : 'N/A'}
+                          </td>
+                          <td className="px-4 py-2">
+                            <div className="flex flex-wrap gap-2">
+                              {(Array.isArray(incident.photos) ? incident.photos : []).map((photo, idx) => (
+                                <button
+                                  key={idx}
+                                  type="button"
+                                  className="focus:outline-none"
+                                  onClick={() => setPhotoModal({ open: true, photo })}
+                                  title="Click to view"
+                                >
+                                  <img
+                                    src={photo}
+                                    alt={`Photo ${idx + 1}`}
+                                    className="h-12 w-12 object-cover rounded border border-gray-300 hover:shadow-lg transition"
+                                    onError={() => console.error("Error loading photo:", photo)}
+                                  />
+                                </button>
+                              ))}
+                            </div>
+                          </td>
+                          <td className="px-6 py-4">
+                            <div className="flex flex-col gap-1">
+                              {(Array.isArray(incident.evidence) ? incident.evidence : []).length === 0 && <span className="text-gray-400 text-xs">No evidence</span>}
+                              {(Array.isArray(incident.evidence) ? incident.evidence : []).map((ev, idx) => (
+                                <button
+                                  key={idx}
+                                  type="button"
+                                  className="text-blue-600 underline text-xs truncate max-w-[120px] text-left"
+                                  title={ev.name}
+                                  onClick={() => handleEvidenceDownload(ev)}
+                                >
+                                  {ev.name}
+                                </button>
+                              ))}
+                            </div>
+                          </td>
+                          <td className="px-6 py-4 whitespace-nowrap">
+                            <span className={`px-2 py-1 rounded-full text-xs ${
+                              incident.status === 'Open' ? 'bg-red-100 text-red-800' :
+                              incident.status === 'Closed' ? 'bg-green-100 text-green-800' :
+                              incident.status === 'Approved' ? 'bg-blue-100 text-blue-800' :
+                              'bg-pink-100 text-pink-800'
+                            }`}>
+                              {incident.status || 'N/A'}
+                            </span>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                )}
+              </div>
+            </div>
+          )}
+
+          {/* Incident Reporting Tab */}
+          {activeTab === "report" && (
+            <div className="bg-white p-6 rounded-lg shadow-md overflow-auto">
+              <h3 className="text-lg font-semibold mb-4">Report New Incident</h3>
+              <div className="space-y-4">
+                <div>
+                  <label className="block text-sm font-medium text-gray-700">Incident Type</label>
+                  <select
+                    name="type"
+                    value={formData.type}
+                    onChange={handleInputChange}
+                    className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring focus:ring-blue-500 focus:ring-opacity-50"
+                    required
+                  >
+                    <option value="Near Miss">Near Miss (No injuries, Facilities Damaged)</option>
+                    <option value="Medical Treatment Case">Medical Treatment Case</option>
+                    <option value="Loss Time Injury">Loss Time Injury</option>
+                    <option value="First Aid Case">First Aid Case</option>
+                    <option value="Restricted Work Case">Restricted Work Case</option>
+                  </select>
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700">Detail of Incident</label>
+                  <input
+                    type="text"
+                    name="detail"
+                    value={formData.detail}
+                    onChange={handleInputChange}
+                    className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring focus:ring-blue-500 focus:ring-opacity-50"
+                    required
+                  />
+                </div>
+                <div className="grid grid-cols-2 gap-4">
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700">Date</label>
+                    <input
+                      type="date"
+                      name="date"
+                      value={formData.date}
+                      onChange={handleInputChange}
+                      className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring focus:ring-blue-500 focus:ring-opacity-50"
+                      required
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700">Time</label>
+                    <input
+                      type="time"
+                      name="time"
+                      value={formData.time}
+                      onChange={handleInputChange}
+                      className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring focus:ring-blue-500 focus:ring-opacity-50"
+                      required
+                    />
+                  </div>
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700">Location</label>
+                  <input
+                    type="text"
+                    name="location"
+                    value={formData.location}
+                    onChange={handleInputChange}
+                    className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring focus:ring-blue-500 focus:ring-opacity-50"
+                    required
+                  />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700">Area</label>
+                  <input
+                    type="text"
+                    name="area"
+                    value={formData.area}
+                    onChange={handleInputChange}
+                    className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring focus:ring-blue-500 focus:ring-opacity-50"
+                  />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700">Incident Owner</label>
+                  <input
+                    type="text"
+                    name="incidentOwner"
+                    value={formData.incidentOwner}
+                    onChange={handleInputChange}
+                    className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring focus:ring-blue-500 focus:ring-opacity-50"
+                  />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700">Involved Person</label>
+                  <input
+                    type="text"
+                    name="involvedPerson"
+                    value={formData.involvedPerson}
+                    onChange={handleInputChange}
+                    className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring focus:ring-blue-500 focus:ring-opacity-50"
+                  />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700">Designation</label>
+                  <input
+                    type="text"
+                    name="designation"
+                    value={formData.designation}
+                    onChange={handleInputChange}
+                    className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring focus:ring-blue-500 focus:ring-opacity-50"
+                  />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700">
+                    Root Causes (Fishbone Diagram)
+                    <span className="block text-xs text-gray-500">Enter one root cause per line</span>
+                  </label>
+                  <textarea
+                    name="rootCauses"
+                    value={formData.rootCauses}
+                    onChange={handleInputChange}
+                    className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring focus:ring-blue-500 focus:ring-opacity-50"
+                    rows="5"
+                    placeholder="e.g. Equipment failure
+Lack of training"
+                    required
+                  />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700">Photos (Max 3)</label>
+                  <input
+                    type="file"
+                    accept="image/*"
+                    multiple
+                    onChange={handlePhotoUpload}
+                    className="mt-1 block w-full"
+                  />
+                  <div className="mt-2 flex flex-wrap gap-2">
+                    {formData.photos.map((photo, index) => (
+                      <img key={index} src={photo} alt={`Incident Photo ${index + 1}`} className="h-24 w-24 object-cover rounded" onError={() => console.error("Error loading photo:", index)} />
+                    ))}
+                  </div>
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700">Evidence Files (Max 3, any type)</label>
+                  <input
+                    type="file"
+                    multiple
+                    onChange={handleEvidenceUpload}
+                    className="mt-1 block w-full"
+                  />
+                  <div className="mt-2 flex flex-col gap-1">
+                    {formData.evidence.map((ev, idx) => (
+                      <span key={idx} className="text-xs text-gray-700 truncate max-w-[180px]" title={ev.name}>
+                        {ev.name}
+                      </span>
+                    ))}
+                  </div>
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700">Correction</label>
+                  <textarea
+                    name="correction"
+                    value={formData.correction}
+                    onChange={handleInputChange}
+                    className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring focus:ring-blue-500 focus:ring-opacity-50"
+                    rows="2"
+                  />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700">Corrective Action</label>
+                  <textarea
+                    name="correctiveAction"
+                    value={formData.correctiveAction}
+                    onChange={handleInputChange}
+                    className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring focus:ring-blue-500 focus:ring-opacity-50"
+                    rows="2"
+                  />
+                </div>
+                <button
+                  onClick={handleSubmit}
+                  className="bg-blue-500 text-white px-4 py-2 rounded-lg hover:bg-blue-600 transition duration-200"
+                >
+                  Submit Incident
+                </button>
+              </div>
+            </div>
+          )}
+
+          {/* Photo Modal */}
+          {photoModal.open && (
+            <PhotoModal
+              photo={photoModal.photo}
+              onClose={() => setPhotoModal({ open: false, photo: null })}
+            />
+          )}
+
+          {/* Remarks Modal */}
+          {selectedIncident && (
+            <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center">
+              <div className="bg-white p-6 rounded-lg shadow-lg max-w-md w-full">
+                <h3 className="text-lg font-semibold mb-4">
+                  {selectedIncident.status === 'Open' ? 'Close' : 'Reopen'} Incident #{incidents.findIndex(i => i.id === selectedIncident.id) + 1}
+                </h3>
+                <div className="mb-4">
+                  <label className="block text-sm font-medium text-gray-700">Remarks</label>
+                  <textarea
+                    value={remarks}
+                    onChange={e => setRemarks(e.target.value)}
+                    className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring focus:ring-blue-500 focus:ring-opacity-50"
+                    rows="4"
+                  />
+                </div>
+                <div className="flex justify-end gap-2">
+                  <button
+                    onClick={() => setSelectedIncident(null)}
+                    className="bg-gray-300 px-4 py-2 rounded hover:bg-gray-400"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    onClick={() => toggleStatus(selectedIncident.id)}
+                    className="bg-blue-500 text-white px-4 py-2 rounded hover:bg-blue-600"
+                  >
+                    {selectedIncident.status === 'Open' ? 'Close Incident' : 'Reopen Incident'}
+                  </button>
+                </div>
+              </div>
+            </div>
+          )}
+        </div>
+      );
+    };
+
+    // Admin Incident Management Component
+    const AdminIncidentManagement = () => {
+      const { user } = useContext(AuthContext) || {};
+      const { addNotification } = useContext(NotificationContext) || {};
+      const [incidents, setIncidents] = useState(() => {
+        try {
+          const saved = localStorage.getItem('incidents');
+          return saved && saved !== 'undefined' ? JSON.parse(saved) : [];
+        } catch (e) {
+          console.error("Error parsing incidents from localStorage:", e);
+          return [];
+        }
+      });
+      const [editingIncident, setEditingIncident] = useState(null);
+      const [deleteConfirm, setDeleteConfirm] = useState(null);
+      const [adminComments, setAdminComments] = useState('');
+      const [photoModal, setPhotoModal] = useState({ open: false, photo: null });
+
+      useEffect(() => {
+        try {
+          localStorage.setItem('incidents', JSON.stringify(incidents));
+        } catch (e) {
+          console.error("Error saving incidents to localStorage:", e);
+          addNotification && addNotification("Failed to save incidents.", 'error');
+        }
+      }, [incidents]);
+
+      if (!user || user.role !== 'administrator') {
+        return (
+          <div className="p-6 bg-gray-100 h-full">
+            <h2 className="text-2xl font-bold mb-6 text-gray-800">Access Denied</h2>
+            <p className="text-gray-600">You do not have permission to access this page.</p>
+          </div>
+        );
+      }
+
+      if (!addNotification) {
+        console.error("NotificationContext is undefined");
+        return <div>Context not available. Please refresh the page.</div>;
+      }
+
+      const handleEdit = (incident) => {
+        setEditingIncident({ ...incident });
+        setAdminComments(incident.adminComments || '');
+      };
+
+      const handleSaveEdit = () => {
+        try {
+          setIncidents(prev => prev.map(inc => inc.id === editingIncident.id ? { ...editingIncident, adminComments } : inc));
+          setEditingIncident(null);
+          setAdminComments('');
+          addNotification('Incident updated successfully!', 'info');
+        } catch (e) {
+          console.error("Error saving edited incident:", e);
+          addNotification('Failed to update incident.', 'error');
+        }
+      };
+
+      const handleStatusChange = (incidentId, newStatus) => {
+        try {
+          setIncidents(prev => prev.map(incident => {
+            if (incident.id === incidentId) {
+              return { ...incident, status: newStatus, adminComments: adminComments || incident.adminComments };
+            }
+            return incident;
+          }));
+          setEditingIncident(null);
+          setAdminComments('');
+          addNotification(`Incident ${incidentId} marked as ${newStatus}!`, 'info');
+        } catch (e) {
+          console.error("Error updating incident status:", e);
+          addNotification('Failed to update incident status.', 'error');
+        }
+      };
+
+      const handleDelete = (incidentId) => {
+        try {
+          const incidentIndex = incidents.findIndex(incident => incident.id === incidentId) + 1;
+          setIncidents(prev => prev.filter(incident => incident.id !== incidentId));
+          setDeleteConfirm(null);
+          addNotification(`Incident #${incidentIndex} deleted successfully!`, 'info');
+        } catch (e) {
+          console.error("Error deleting incident:", e);
+          addNotification('Failed to delete incident.', 'error');
+        }
+      };
+
+      // Helper function to download evidence files
+      const handleEvidenceDownload = (evidence) => {
+        const link = document.createElement('a');
+        link.href = evidence.data;
+        link.download = evidence.name;
+        document.body.appendChild(link);
+        link.click();
+        document.body.removeChild(link);
+      };
+
+      const downloadExcel = () => {
+        try {
+          const worksheetData = incidents.map((incident, index) => ({
+            'Incident ID': index + 1,
+            'Type': incident.type,
+            'Detail': incident.detail,
+            'Date': incident.date,
+            'Time': incident.time,
+            'Location': incident.location,
+            'Area': incident.area,
+            'Incident Owner': incident.incidentOwner,
+            'Involved Person': incident.involvedPerson,
+            'Designation': incident.designation,
+            'Root Causes': Array.isArray(incident.rootCauses) ? incident.rootCauses.join(', ') : '',
+            'Correction': incident.correction,
+            'Corrective Action': incident.correctiveAction,
+            'Evidence Files': Array.isArray(incident.evidence) ? incident.evidence.map(e => e.name).join(', ') : '',
+            'Status': incident.status,
+            'Remarks': incident.remarks || '',
+            'Admin Comments': incident.adminComments || '',
+            'Reported By': incident.reportedBy,
+            'Reported At': incident.reportedAt,
+          }));
+
+          const worksheet = XLSX.utils.json_to_sheet(worksheetData);
+          const workbook = XLSX.utils.book_new();
+          XLSX.utils.book_append_sheet(workbook, worksheet, 'Incidents');
+          XLSX.writeFile(workbook, 'Incident_Records.xlsx');
+        } catch (e) {
+          console.error("Error generating Excel file:", e);
+          addNotification('Failed to download Excel file.', 'error');
+        }
+      };
+
+      return (
+        <div className="p-6 bg-gray-100 flex-grow">
+          <h2 className="text-2xl font-bold mb-6 text-gray-800">Incident Management</h2>
+          <div className="bg-white p-0 rounded-lg shadow-md mb-8 overflow-hidden flex flex-col">
+            <div className="flex justify-between items-center p-6 pb-2">
+              <h3 className="text-lg font-semibold">All Incidents</h3>
+              <button
+                onClick={downloadExcel}
+                className="bg-green-500 text-white px-4 py-2 rounded-lg hover:bg-green-600 transition duration-200"
+              >
+                Download Excel
+              </button>
+            </div>
+            {incidents.length === 0 ? (
+              <p className="text-gray-500 p-6">No incidents reported.</p>
+            ) : (
+              <div className="overflow-x-auto overflow-y-auto" style={{ maxHeight: "calc(100vh - 200px)" }}>
+                <table className="min-w-full divide-y divide-gray-200">
+                  <thead className="bg-gray-50 sticky top-0 z-10">
+                    <tr>
+                      <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">ID</th>
+                      <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Type</th>
+                      <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Detail</th>
+                      <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Date</th>
+                      <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Location</th>
+                      <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Photos</th>
+                      <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Evidence</th>
+                      <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Status</th>
+                      <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Reported By</th>
+                      <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Actions</th>
+                    </tr>
+                  </thead>
+                  <tbody className="bg-white divide-y divide-gray-200">
+                    {incidents.map((incident, index) => (
+                      <tr key={incident.id || index}>
+                        <td className="px-6 py-4 whitespace-nowrap">{index + 1}</td>
+                        <td className="px-6 py-4 whitespace-nowrap">{incident.type || 'N/A'}</td>
+                        <td className="px-6 py-4 break-words max-w-xs">{incident.detail || 'N/A'}</td>
+                        <td className="px-6 py-4 whitespace-nowrap">{incident.date ? new Date(incident.date).toLocaleDateString() : 'N/A'}</td>
+                        <td className="px-6 py-4 whitespace-nowrap">{incident.location || 'N/A'}</td>
+                        <td className="px-6 py-4">
+                          <div className="flex flex-wrap gap-2">
+                            {(Array.isArray(incident.photos) ? incident.photos : []).map((photo, idx) => (
+                              <button
+                                key={idx}
+                                type="button"
+                                className="focus:outline-none"
+                                onClick={() => setPhotoModal({ open: true, photo })}
+                                title="Click to view"
+                              >
+                                <img 
+                                  src={photo} 
+                                  alt={`Photo ${idx + 1}`} 
+                                  className="h-16 w-16 object-cover rounded border border-gray-300 hover:shadow-lg transition" 
+                                  onError={() => console.error("Error loading photo:", photo)} 
+                                />
+                              </button>
+                            ))}
+                          </div>
+                        </td>
+                        <td className="px-4 py-2">
+                          <div className="flex flex-col gap-1">
+                            {(Array.isArray(incident.evidence) ? incident.evidence : []).length === 0 && <span className="text-gray-400 text-xs">No evidence</span>}
+                            {(Array.isArray(incident.evidence) ? incident.evidence : []).map((ev, idx) => (
+                              <button
+                                key={idx}
+                                type="button"
+                                className="text-blue-600 underline text-xs truncate max-w-[80px] text-left"
+                                title={ev.name}
+                                onClick={() => handleEvidenceDownload(ev)}
+                              >
+                                {ev.name}
+                              </button>
+                            ))}
+                          </div>
+                        </td>
+                        <td className="px-4 py-2 whitespace-nowrap">
+                          <span className={`px-2 py-1 rounded-full text-xs ${
+                            incident.status === 'Open' ? 'bg-red-100 text-red-800' :
+                            incident.status === 'Closed' ? 'bg-green-100 text-green-800' :
+                            incident.status === 'Approved' ? 'bg-blue-100 text-blue-800' :
+                            'bg-pink-100 text-pink-800'
+                          }`}>
+                            {incident.status || 'N/A'}
+                          </span>
+                        </td>
+                        <td className="px-6 py-4 whitespace-nowrap">{incident.reportedBy || 'N/A'}</td>
+                        <td className="px-6 py-4 whitespace-nowrap flex gap-2">
+                          <button
+                            onClick={() => handleEdit(incident)}
+                            className="bg-blue-500 text-white px-3 py-1 rounded hover:bg-blue-600"
+                          >
+                            Edit
+                          </button>
+                          <button
+                            onClick={() => setDeleteConfirm(incident.id)}
+                            className="bg-red-500 text-white px-3 py-1 rounded hover:bg-red-600"
+                          >
+                            Delete
+                          </button>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </div>
+
+          {editingIncident && (
+            <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center">
+              <div className="bg-white p-6 rounded-lg shadow-lg max-w-lg w-full">
+                <h3 className="text-lg font-semibold mb-4">Edit Incident #{incidents.findIndex(i => i.id === editingIncident.id) + 1}</h3>
+                <div className="space-y-4">
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700">Incident Type</label>
+                    <select
+                      name="type"
+                      value={editingIncident.type}
+                      onChange={e => setEditingIncident({ ...editingIncident, type: e.target.value })}
+                      className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring focus:ring-blue-500 focus:ring-opacity-50"
+                    >
+                      <option value="Near Miss">Near Miss (No injuries, Facilities Damaged)</option>
+                      <option value="Medical Treatment Case">Medical Treatment Case</option>
+                      <option value="Loss Time Injury">Loss Time Injury</option>
+                      <option value="First Aid Case">First Aid Case</option>
+                      <option value="Restricted Work Case">Restricted Work Case</option>
+                    </select>
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700">Detail of Incident</label>
+                    <input
+                      type="text"
+                      value={editingIncident.detail}
+                      onChange={e => setEditingIncident({ ...editingIncident, detail: e.target.value })}
+                      className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring focus:ring-blue-500 focus:ring-opacity-50"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700">
+                      Root Causes
+                      <span className="block text-xs text-gray-500">Enter one root cause per line</span>
+                    </label>
+                    <textarea
+                      value={editingIncident.rootCauses.join('\n')}
+                      onChange={e => setEditingIncident({
+                        ...editingIncident,
+                        rootCauses: e.target.value.split('\n').map(line => line.trim()).filter(line => line.length > 0)
+                      })}
+                      className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring focus:ring-blue-500 focus:ring-opacity-50"
+                      rows="4"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700">Evidence Files (Max 3, any type)</label>
+                    <input
+                      type="file"
+                      multiple
+                      onChange={async (e) => {
+                        const files = Array.from(e.target.files).slice(0, 3);
+                        const readers = files.map(file => {
+                          return new Promise(resolve => {
+                            const reader = new FileReader();
+                            reader.onload = () => resolve({
+                              name: file.name,
+                              type: file.type,
+                              data: reader.result
+                            });
+                            reader.onerror = () => {
+                              console.error("Error reading evidence file:", file.name);
+                              resolve(null);
+                            };
+                            reader.readAsDataURL(file);
+                          });
+                        });
+                        const results = await Promise.all(readers);
+                        const validResults = results.filter(r => r);
+                        // Append new evidence to existing (max 3 total)
+                        setEditingIncident(prev => ({
+                          ...prev,
+                          evidence: [
+                            ...(Array.isArray(prev.evidence) ? prev.evidence : []),
+                            ...validResults
+                          ].slice(0, 3)
+                        }));
+                        addNotification("Evidence files added successfully.", "info");
+                      }}
+                      className="mt-1 block w-full"
+                    />
+                    <div className="mt-2 flex flex-col gap-1">
+                      {(Array.isArray(editingIncident.evidence) ? editingIncident.evidence : []).map((ev, idx) => (
+                        <div key={idx} className="flex justify-between items-center">
+                          <span className="text-xs text-gray-700 truncate max-w-[180px]" title={ev.name}>
+                            {ev.name}
+                          </span>
+                          <button 
+                            onClick={() => {
+                              setEditingIncident(prev => ({
+                                ...prev,
+                                evidence: prev.evidence.filter((_, i) => i !== idx)
+                              }));
+                            }}
+                            className="text-red-500 text-xs hover:text-red-700"
+                            title="Remove file"
+                          >
+                            ✕
+                          </button>
+                        </div>
+                      ))}
+                      {(!editingIncident.evidence || editingIncident.evidence.length === 0) && 
+                        <span className="text-xs text-gray-400">No evidence files attached</span>
+                      }
+                    </div>
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700">Admin Comments</label>
+                    <textarea
+                      value={adminComments}
+                      onChange={e => setAdminComments(e.target.value)}
+                      className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring focus:ring-blue-500 focus:ring-opacity-50"
+                      rows="4"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700">Status</label>
+                    <select
+                      value={editingIncident.status}
+                      onChange={e => setEditingIncident({ ...editingIncident, status: e.target.value })}
+                      className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring focus:ring-blue-500 focus:ring-opacity-50"
+                    >
+                      <option value="Open">Open</option>
+                      <option value="Closed">Closed</option>
+                      <option value="Approved">Approved</option>
+                      <option value="Rejected">Rejected</option>
+                    </select>
+                  </div>
+                </div>
+                <div className="flex justify-end gap-2 mt-4">
+                  <button
+                    onClick={() => setEditingIncident(null)}
+                    className="bg-gray-300 px-4 py-2 rounded hover:bg-gray-400"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    onClick={handleSaveEdit}
+                    className="bg-blue-500 text-white px-4 py-2 rounded hover:bg-blue-600"
+                  >
+                    Save
+                  </button>
+                  <button
+                    onClick={() => handleStatusChange(editingIncident.id, 'Approved')}
+                    className="bg-green-500 text-white px-4 py-2 rounded hover:bg-green-600"
+                  >
+                    Approve
+                  </button>
+                  <button
+                    onClick={() => handleStatusChange(editingIncident.id, 'Rejected')}
+                    className="bg-red-500 text-white px-4 py-2 rounded hover:bg-red-600"
+                  >
+                    Reject
+                  </button>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* Photo Modal */}
+          {photoModal.open && (
+            <PhotoModal
+              photo={photoModal.photo}
+              onClose={() => setPhotoModal({ open: false, photo: null })}
+            />
+          )}
+
+          {deleteConfirm && (
+            <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center">
+              <div className="bg-white p-6 rounded-lg shadow-lg max-w-md w-full">
+                <h3 className="text-lg font-semibold mb-4 text-red-600">Confirm Incident Deletion</h3>
+                <p>Are you sure you want to permanently delete Incident #{incidents.findIndex(i => i.id === deleteConfirm) + 1}? This action cannot be undone.</p>
+                <div className="flex justify-end gap-2 mt-4">
+                  <button
+                    onClick={() => setDeleteConfirm(null)}
+                    className="bg-gray-300 px-4 py-2 rounded hover:bg-gray-400"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    onClick={() => handleDelete(deleteConfirm)}
+                    className="bg-red-500 text-white px-4 py-2 rounded hover:bg-red-600"
+                  >
+                    Delete Permanently
+                  </button>
+                </div>
+              </div>
+            </div>
+          )}
+        </div>
+      );
+    };
+
+    // User Management Component
+    const UserManagement = () => {
+      const { user, users, addUser } = useContext(AuthContext) || {};
+      const { addNotification } = useContext(NotificationContext) || {};
+      const [formData, setFormData] = useState({
+        username: '',
+        email: '',
+        password: '',
+        role: 'employee'
+      });
+
+      if (!user || user.role !== 'administrator') {
+        return (
+          <div className="p-6 bg-gray-100 h-full">
+            <h2 className="text-2xl font-bold mb-6 text-gray-800">Access Denied</h2>
+            <p className="text-gray-600">You do not have permission to access this page.</p>
+          </div>
+        );
+      }
+
+      const handleInputChange = (e) => {
+        setFormData({ ...formData, [e.target.name]: e.target.value });
+      };
+
+      const handleSubmit = (e) => {
+        e.preventDefault();
+        if (!formData.username || !formData.email || !formData.password) {
+          addNotification('Please fill in all required fields.', 'error');
+          return;
+        }
+        if (users.some(u => u.username === formData.username)) {
+          addNotification('Username already exists.', 'error');
+          return;
+        }
+        if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(formData.email)) {
+          addNotification('Invalid email format.', 'error');
+          return;
+        }
+        const newUser = addUser(formData);
+        setFormData({ username: '', email: '', password: '', role: 'employee' });
+        addNotification(
+          `New ${newUser.role} account created for ${newUser.username}!`,
+          'info'
+        );
+      };
+
+      return (
+        <div className="p-6 bg-gray-100 flex-grow">
+          <h2 className="text-2xl font-bold mb-6 text-gray-800">User Management</h2>
+          <div className="bg-white p-6 rounded-lg shadow-md mb-8">
+            <h3 className="text-lg font-semibold mb-4">Add New User</h3>
+            <form onSubmit={handleSubmit} className="space-y-4">
+              <div>
+                <label className="block text-sm font-medium text-gray-700">Username</label>
+                <input
+                  type="text"
+                  name="username"
+                  value={formData.username}
+                  onChange={handleInputChange}
+                  className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring focus:ring-blue-500 focus:ring-opacity-50"
+                  required
+                />
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700">Email</label>
+                <input
+                  type="email"
+                  name="email"
+                  value={formData.email}
+                  onChange={handleInputChange}
+                  className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring focus:ring-blue-500 focus:ring-opacity-50"
+                  required
+                />
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700">Password</label>
+                <input
+                  type="password"
+                  name="password"
+                  value={formData.password}
+                  onChange={handleInputChange}
+                  className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring focus:ring-blue-500 focus:ring-opacity-50"
+                  required
+                />
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700">Role</label>
+                <select
+                  name="role"
+                  value={formData.role}
+                  onChange={handleInputChange}
+                  className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring focus:ring-blue-500 focus:ring-opacity-50"
+                >
+                  <option value="employee">Employee (Standard User)</option>
+                  <option value="administrator">Administrator</option>
+                </select>
+              </div>
+              <button
+                type="submit"
+                className="bg-blue-500 text-white px-4 py-2 rounded-lg hover:bg-blue-600 transition duration-200"
+              >
+                Add User
+              </button>
+            </form>
+          </div>
+          <div className="bg-white p-6 rounded-lg shadow-md overflow-auto">
+            <h3 className="text-lg font-semibold mb-4">Existing Users</h3>
+            {users.length === 0 ? (
+              <p className="text-gray-500">No users found.</p>
+            ) : (
+              <div className="overflow-x-auto">
+                <table className="min-w-full divide-y divide-gray-200">
+                  <thead className="bg-gray-50">
+                    <tr>
+                      <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Username</th>
+                      <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Email</th>
+                      <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Role</th>
+                    </tr>
+                  </thead>
+                  <tbody className="bg-white divide-y divide-gray-200">
+                    {users.map(u => (
+                      <tr key={u.id}>
+                        <td className="px-6 py-4 whitespace-nowrap">{u.username}</td>
+                        <td className="px-6 py-4 whitespace-nowrap">{u.email}</td>
+                        <td className="px-6 py-4 whitespace-nowrap">
+                          <span className={`px-2 py-1 rounded-full text-xs ${
+                            u.role === 'administrator' ? 'bg-blue-100 text-blue-800' : 'bg-green-100 text-green-800'
+                          }`}>
+                            {u.role}
+                          </span>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </div>
+        </div>
+      );
+    };
+
+    // Documentation Library Component
+    const DocumentationLibrary = () => {
+      const { user } = useContext(AuthContext) || {};
+      const { documents, addDocument } = useContext(DocumentsContext) || {};
+      const { addNotification } = useContext(NotificationContext) || {};
+      const [selectedFolder, setSelectedFolder] = useState('Procedure');
+      const [uploadFile, setUploadFile] = useState(null);
+
+      const folders = ['Procedure', 'Guidelines', 'Forms'];
+
+      const handleFileUpload = (e) => {
+        const file = e.target.files[0];
+        if (file) {
+          const reader = new FileReader();
+          reader.onload = () => {
+            const doc = {
+              id: Date.now(),
+              name: file.name,
+              data: reader.result,
+              uploadedAt: new Date().toISOString(),
+              uploadedBy: user.name
+            };
+            addDocument(selectedFolder, doc);
+            addNotification(`File "${file.name}" uploaded to ${selectedFolder} successfully!`, 'info');
+            setUploadFile(null);
+          };
+          reader.onerror = () => {
+            addNotification('Failed to upload file.', 'error');
+          };
+          reader.readAsDataURL(file);
+        }
+      };
+
+      const handleDownload = (doc) => {
+        const link = document.createElement('a');
+        link.href = doc.data;
+        link.download = doc.name;
+        document.body.appendChild(link);
+        link.click();
+        document.body.removeChild(link);
+      };
+
+      return (
+        <div className="p-6 bg-gray-100 flex-grow">
+          <h2 className="text-2xl font-bold mb-6 text-gray-800">Documentation Library</h2>
+          <div className="mb-6">
+            <div className="flex border-b">
+              {folders.map(folder => (
+                <button
+                  key={folder}
+                  onClick={() => setSelectedFolder(folder)}
+                  className={`px-4 py-2 -mb-px border-b-2 font-medium text-sm ${
+                    selectedFolder === folder
+                      ? 'border-blue-500 text-blue-600'
+                      : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
+                  }`}
+                >
+                  {folder}
+                </button>
+              ))}
+            </div>
+          </div>
+          {user?.role === 'administrator' && (
+            <div className="bg-white p-6 rounded-lg shadow-md mb-6">
+              <h3 className="text-lg font-semibold mb-4">Upload Document to {selectedFolder}</h3>
+              <input
+                type="file"
+                onChange={handleFileUpload}
+                className="mt-1 block w-full"
+              />
+            </div>
+          )}
+          <div className="bg-white p-6 rounded-lg shadow-md overflow-auto">
+            <h3 className="text-lg font-semibold mb-4">Documents in {selectedFolder}</h3>
+            {documents[selectedFolder].length === 0 ? (
+              <p className="text-gray-500">No documents found in this folder.</p>
+            ) : (
+              <div className="overflow-x-auto">
+                <table className="min-w-full divide-y divide-gray-200">
+                  <thead className="bg-gray-50">
+                    <tr>
+                      <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">File Name</th>
+                      <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Uploaded At</th>
+                      <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Uploaded By</th>
+                      <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Actions</th>
+                    </tr>
+                  </thead>
+                  <tbody className="bg-white divide-y divide-gray-200">
+                    {documents[selectedFolder].map(doc => (
+                      <tr key={doc.id}>
+                        <td className="px-6 py-4 whitespace-nowrap">{doc.name}</td>
+                        <td className="px-6 py-4 whitespace-nowrap">{new Date(doc.uploadedAt).toLocaleString()}</td>
+                        <td className="px-6 py-4 whitespace-nowrap">{doc.uploadedBy}</td>
+                        <td className="px-6 py-4 whitespace-nowrap">
+                          <button
+                            onClick={() => handleDownload(doc)}
+                            className="bg-blue-500 text-white px-3 py-1 rounded hover:bg-blue-600"
+                          >
+                            {user?.role === 'administrator' ? 'Download' : 'View'}
+                          </button>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </div>
+        </div>
+      );
+    };
+
+    // Placeholder Components
+    const TrainingManagement = () => (
+      <div className="p-6 bg-gray-100 flex-grow">
+        <h2 className="text-2xl font-bold mb-6 text-gray-800">Training Management</h2>
+        <p className="text-gray-600">Calendar and tools for managing training sessions (to be implemented).</p>
+      </div>
+    );
+
+    const ComplianceTracking = () => (
+      <div className="p-6 bg-gray-100 flex-grow">
+        <h2 className="text-2xl font-bold mb-6 text-gray-800">Compliance Tracking</h2>
+        <p className="text-gray-600">Audit schedules and findings tracking (to be implemented).</p>
+      </div>
+    );
+
+    // Login Page Component
+    const LoginPage = () => {
+      const { login } = useContext(AuthContext) || {};
+      const { addNotification } = useContext(NotificationContext) || {};
+      const [formData, setFormData] = useState({ username: '', password: '' });
+
+      const handleInputChange = (e) => {
+        setFormData({ ...formData, [e.target.name]: e.target.value });
+      };
+
+      const handleSubmit = (e) => {
+        e.preventDefault();
+        if (!login || !addNotification) {
+          console.error("Login or notification context missing");
+          return;
+        }
+        if (login(formData.username, formData.password)) {
+          addNotification('Login successful!', 'info');
+        } else {
+          addNotification('Invalid username or password.', 'error');
+        }
+      };
+
+      return (
+        <div className="flex items-center justify-center h-screen bg-gray-100">
+          <div className="bg-white p-8 rounded-lg shadow-lg max-w-md w-full">
+            <h2 className="text-2xl font-bold mb-6 text-gray-800">Login</h2>
+            <form onSubmit={handleSubmit} className="space-y-4">
+              <div>
+                <label className="block text-sm font-medium text-gray-700">Username</label>
+                <input
+                  type="text"
+                  name="username"
+                  value={formData.username}
+                  onChange={handleInputChange}
+                  className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring focus:ring-blue-500 focus:ring-opacity-50"
+                  required
+                />
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700">Password</label>
+                <input
+                  type="password"
+                  name="password"
+                  value={formData.password}
+                  onChange={handleInputChange}
+                  className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring focus:ring-blue-500 focus:ring-opacity-50"
+                  required
+                />
+              </div>
+              <button
+                type="submit"
+                className="w-full bg-blue-500 text-white px-4 py-2 rounded-lg hover:bg-blue-600 transition duration-200"
+              >
+                Login
+              </button>
+            </form>
+          </div>
+        </div>
+      );
+    };
+
+    // Main App Component
+    const App = () => {
+      const { user } = useContext(AuthContext) || {};
+      const { notifications } = useContext(NotificationContext) || {};
+      const [page, setPage] = useState(window.location.hash.slice(1) || "dashboard");
+
+      useEffect(() => {
+        const handleHashChange = () => setPage(window.location.hash.slice(1) || "dashboard");
+        window.addEventListener("hashchange", handleHashChange);
+        return () => window.removeEventListener("hashchange", handleHashChange);
+      }, []);
+
+      if (!user) return <LoginPage />;
+
+      return (
+        <div className="flex flex-col h-screen overflow-hidden">
+          <TopNavBar page={page} setPage={setPage} />
+          <div className="flex-1 min-h-0 overflow-y-auto bg-gray-100">
+            {page === "dashboard" && <DashboardOverview />}
+            {page === "incidents" && <IncidentReporting />}
+            {page === "incident-management" && <AdminIncidentManagement />}
+            {page === "training" && <TrainingManagement />}
+            {page === "compliance" && <ComplianceTracking />}
+            {page === "documents" && <DocumentationLibrary />}
+            {page === "users" && <UserManagement />}
+            <div className="fixed top-20 right-4 space-y-2 z-50">
+              {(notifications || []).map(notif => (
+                <Notification key={notif.id} message={notif.message} type={notif.type} />
+              ))}
+            </div>
+          </div>
+        </div>
+      );
+    };
+
+    // Render the Application
+    ReactDOM.render(
+      <ErrorBoundary>
+        <AuthProvider>
+          <NotificationProvider>
+            <DataProvider>
+              <DocumentsProvider>
+                <App />
+              </DocumentsProvider>
+            </DataProvider>
+          </NotificationProvider>
+        </AuthProvider>
+      </ErrorBoundary>,
+      document.getElementById("root")
+    );
+  </script>
+</body>
+</html>
